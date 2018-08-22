@@ -8,9 +8,31 @@ class TrackFinder:
     
     MaxDetectorSize = 3000.0 # in mm
     
-    def __init__(self, logp_thresh = -10):
+    class CircularBuffer:
+        
+        def __init__(self, size):
+            assert size > 0
+            self.buffer = list()
+            self.size = size
+            
+        def __len__(self):
+            "Number of elements in the buffer"
+            return len(self.buffer)
+        
+        def add(self, elem):
+            "Add an element to the buffer"
+            if len(self.buffer) >= self.size:
+                self.buffer.pop(0)
+            self.buffer.append(elem)
+            
+        def values(self):
+            "Returns the buffer values as 1-dim Numpy array"
+            return np.array(self.buffer).flatten()
+            
+    
+    def __init__(self, max_net = 5, logp_thresh = -10):
         """
-        Creates a list of networks calculating logarithm of p(hit belongs to track | previous hits in the track)
+        Creates a dictionary of networks calculating logarithm of p(hit belongs to track | previous hits in the track)
         Input dimension is (x,y,z,[volume,layer,module]) * n + q, where n is the number of previous hits
         Output dimension is (x,y,z,[volume,layer,module])
         """
@@ -20,6 +42,7 @@ class TrackFinder:
         self.output_columns = ['x','y','z']
         self.log_prob = {-1 : None, 1 : None}
         self.logp_thresh = logp_thresh
+        self.max_net = max_net
         
     def get_net(self,i):
         " Creates a new net if not present, otherwise returns the existing one"
@@ -36,13 +59,14 @@ class TrackFinder:
     def make_train_data(self, tracks, hits, charges):
         " Adds the event data to the batch data"
         for track in tracks.keys():
-            l = np.array([charges[track]])
-            i = 0
+            l0 = np.array([charges[track]])
+            buf = TrackFinder.CircularBuffer(size=self.max_net)
             for hit in tracks[track]:
+                i = len(buf)
+                l = np.append(l0, buf.values(), axis=0)
                 self.get_data(i)['input'].append(l)
                 self.get_data(i)['output'].append(hits.loc[hit,self.output_columns].values)
-                l = np.append(l, hits.loc[hit,:].values, axis=0)
-                i = i + 1
+                buf.add(hits.loc[hit,:].values)
 
     @staticmethod               
     def distance(x,y):
@@ -60,30 +84,33 @@ class TrackFinder:
         """
         result = dict()
         for track in np.random.choice(tracks.keys(), size):
-            l = np.array([charges[track]])
-            i = 0
+            l0 = np.array([charges[track]])
+            buf = TrackFinder.CircularBuffer(size=self.max_net)
             result[track] = list()
             for hit in tracks[track]:
+                i = len(buf)
                 if i not in self.nets.keys():
                     break
+                l = np.append(l0, buf.values(), axis = 0)
                 net = self.nets[i]
                 if i > 0:
                     x = net.predict(l)
                 else:
                     x = np.zeros((3))
                 y = hits.loc[hit,:].values
+                buf.add(y)    
                 logp = net.predict_log_proba(l,hits.loc[hit,self.output_columns].values)
                 r = TrackFinder.distance(y,x)
-                result[track].append((logp,r))    
-                l = np.append(l, y, axis = 0)
-                i = i + 1
+                result[track].append((logp,r))
+            i = len(buf)
             if i in self.nets.keys():
+                l = np.append(l0, buf.values(), axis = 0)
                 net = self.nets[i]
                 x = net.predict(l)
                 r = 0
                 logp = net.predict_log_proba(l,x)
                 result[track].append((logp,r))
-        print result
+        return result
     
     def train(self, path='../data/train/', batch_size = 10000, validation_split=(99,100), number_of_events = np.inf):
         """
@@ -247,6 +274,9 @@ class TrackFinder:
         logp_max = -np.inf
         next_hit = None
         net = len(track)
+        if net > self.max_net:
+            track = track[-self.max_net:]
+            net = self.max_net
         if net in self.nets.keys():
             x = np.append(q, hits.loc[track,:].values.flatten())
             # the prediction is not a valid hit
@@ -254,6 +284,13 @@ class TrackFinder:
             # find all hits within a certain spatial radius of the prediction
             nearest_hits = self.get_nearest_hits(hits,track,x_max,r)
             if not nearest_hits.empty:
+# FutureWarning:
+# Passing list-likes to .loc or [] with any missing label will raise
+# KeyError in the future, you can use .reindex() as an alternative.
+# 
+# See the documentation here:
+# https://pandas.pydata.org/pandas-docs/stable/indexing.html#deprecate-loc-reindex
+# -listlike
                 y = hits.loc[nearest_hits,self.output_columns].values
                 # calculate the log probability of all hits near to the prediction
                 logp = self.nets[net].predict_log_proba(x,y)
