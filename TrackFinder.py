@@ -1,3 +1,4 @@
+from __future__ import print_function
 import numpy as np
 import pandas as pd
 from trackml.dataset import load_dataset
@@ -73,6 +74,13 @@ class TrackFinder:
         "Distance between two hit coordinates"
         r = y[0:3] - x[0:3]
         return np.sqrt(np.sum(r*r))
+        
+    @staticmethod
+    def random_choice(l, size):
+        if isinstance(l, list):
+            return np.random.choice(l, size, replace = False)
+        else:
+            return np.random.choice(list(l), size, replace = False)
 
     def validate_nets(self, tracks, hits, charges, size=10):
         """ 
@@ -83,7 +91,7 @@ class TrackFinder:
         where the log probability drops below the threshold).
         """
         result = dict()
-        for track in np.random.choice(tracks.keys(), size):
+        for track in TrackFinder.random_choice(tracks.keys(), size):
             l0 = np.array([charges[track]])
             buf = TrackFinder.CircularBuffer(size=self.max_net)
             result[track] = list()
@@ -146,7 +154,7 @@ class TrackFinder:
                 tracks[particle] = df.sort_values('r2', axis = 0).index.values
                 charges[particle] = particles.loc[particle,'q']
  
-            print "Found " + str(len(tracks.keys())) + " tracks in event " + str(event)
+            print ("Found " + str(len(tracks.keys())) + " tracks in event " + str(event))
 
             if train:
                 # training phase
@@ -156,12 +164,12 @@ class TrackFinder:
                     x = np.array(self.data[i]['input'])
                     y = np.array(self.data[i]['output'])
                     if y.shape[0] > batch_size:
-                        print "Fitting net " + str(i)
+                        print ("Fitting net " + str(i))
                         # check for NaN's in train data
                         #if np.any(np.isnan(x)):
-                        #    print "NaN in input"
+                        #    print ("NaN in input")
                         #if np.any(np.isnan(y)):
-                        #    print "NaN in output"
+                        #    print ("NaN in output")
                         self.get_net(i).partial_fit(x, y)
                         self.data[i]['input'] = list()
                         self.data[i]['output'] = list()
@@ -174,8 +182,8 @@ class TrackFinder:
                     self.find_track(hits, tracks_pred)
                 submission = self.make_submission(tracks_pred)
                 score = score_event(truth, submission)
-                print "Score after " + str(n_events) + " is " + str(score)
-                print "Number of predicted tracks is " + str(len(tracks_pred))
+                print ("Score after " + str(n_events) + " is " + str(score))
+                print ("Number of predicted tracks is " + str(len(tracks_pred)))
                         
             n_events = n_events + 1
             if n_events >= number_of_events:
@@ -193,7 +201,7 @@ class TrackFinder:
             # apply tracking algorithm
             while len(hits.index) > 0:
                 self.find_track(hits,tracks[event])
-            print str(len(tracks[event])) + " tracks found in event " + str(event)
+            print (str(len(tracks[event])) + " tracks found in event " + str(event))
 
             n_events = n_events + 1
             if n_events >= number_of_events:
