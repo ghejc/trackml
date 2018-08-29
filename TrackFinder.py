@@ -4,6 +4,9 @@ import pandas as pd
 from trackml.dataset import load_dataset
 from trackml.score import score_event
 from GaussianMixtureDensityNetwork import GaussianMixtureDensityNetwork
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
 
 class TrackFinder:
     
@@ -84,42 +87,54 @@ class TrackFinder:
 
     def validate_nets(self, tracks, hits, charges, size=10):
         """ 
-        Applies nets to a random choice of tracks and returns a dictionary
-        of tracks containing a list of tuples with the spatial distance between
-        predicted and actual hit and the log probability of the
-        actual hit including the stopping criterion (the next hit,
-        where the log probability drops below the threshold).
+        Applies nets to a random selection of tracks and saves 3D plots
+        of predicted and actual track, where the predicted track has
+        a color map proportional to the probability of the prediction.
         """
-        result = dict()
         for track in TrackFinder.random_choice(tracks.keys(), size):
             l0 = np.array([charges[track]])
             buf = TrackFinder.CircularBuffer(size=self.max_net)
-            result[track] = list()
+            x = np.zeros((len(tracks[track]) + 1,3))
+            logp = np.zeros((len(tracks[track]) + 1))
+            n = 0
             for hit in tracks[track]:
                 i = len(buf)
                 if i not in self.nets.keys():
                     break
                 l = np.append(l0, buf.values(), axis = 0)
                 net = self.nets[i]
-                if i > 0:
-                    x = net.predict(l)
-                else:
-                    x = np.zeros((3))
                 y = hits.loc[hit,:].values
-                buf.add(y)    
-                logp = net.predict_log_proba(l,hits.loc[hit,self.output_columns].values)
-                r = TrackFinder.distance(y,x)
-                result[track].append((logp,r))
+                buf.add(y)
+                if i > 0:
+                    x[n,:] = net.predict(l)
+                else:
+                    # the first hit is not predicted
+                    x[n,:] = y[0:3]
+                logp[n] = net.predict_log_proba(l, x[n,:])
+                n = n + 1 
             i = len(buf)
             if i in self.nets.keys():
                 l = np.append(l0, buf.values(), axis = 0)
                 net = self.nets[i]
-                x = net.predict(l)
-                r = 0
-                logp = net.predict_log_proba(l,x)
-                result[track].append((logp,r))
-        return result
-    
+                x[n,:] = net.predict(l)
+                logp[n] = net.predict_log_proba(l, x[n,:])
+            # 3D plot with actual and predicted track
+            fig = plt.figure()
+            ax = fig.add_subplot(111, projection='3d')
+            ax.scatter(x[:,0], x[:,1], x[:,2], c=logp, marker='x', cmap='jet')
+            plot = ax.scatter(hits.loc[tracks[track],'x'].values, 
+                       hits.loc[tracks[track],'y'].values,
+                       hits.loc[tracks[track],'z'].values,
+                       c='red', marker='+')
+            ax.set_title('Track ' + str(track) + ' with charge ' + str(charges[track]))
+            m = cm.ScalarMappable(cmap=plot.cmap)
+            m.set_array(logp)
+            cb = plt.colorbar(m)
+            cb.set_label('Log Probability Density')
+            plt.savefig('track_' + str(track) + '.png', dpi=400, bbox_inches='tight')
+            # plt.show()
+            
+   
     def train(self, path='../data/train/', batch_size = 10000, validation_split=(99,100), number_of_events = np.inf):
         """
         Loads all training data, generates a dictionary of tracks with a ordered
@@ -177,17 +192,20 @@ class TrackFinder:
                 # validation phase
                 self.validate_nets(tracks,hits,charges)
                 # calculate score
-                tracks_pred = []
-                while len(hits.index) > 0:
-                    self.find_track(hits, tracks_pred)
-                submission = self.make_submission(tracks_pred)
-                score = score_event(truth, submission)
-                print ("Score after " + str(n_events) + " is " + str(score))
-                print ("Number of predicted tracks is " + str(len(tracks_pred)))
+                # score = self.get_score(hits,truth)
+                # print ("Score after " + str(n_events) + " is " + str(score))
                         
             n_events = n_events + 1
             if n_events >= number_of_events:
                 break
+            
+    def get_score(self, hits, truth):
+        tracks_pred = []
+        while len(hits.index) > 0:
+            self.find_track(hits, tracks_pred)
+        submission = self.make_submission(tracks_pred)
+        score = score_event(truth, submission)
+        return score
             
     def test(self, path='../data/test/', number_of_events = np.inf):
         "Loads all test data (125 events)"
@@ -339,6 +357,6 @@ class TrackFinder:
 
 if __name__ == '__main__':
     tf = TrackFinder()
-    tf.train(number_of_events = 200)
+    tf.train(validation_split=(2,3), number_of_events = 200)
     tf.save('tf')
     tf.make_submission_file(tf.test(number_of_events = 10))

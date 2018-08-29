@@ -91,7 +91,7 @@ class GaussianMixtureDensityNetwork:
         alpha = K.softmax(K.clip(alpha,1e-8,1.))
     
         exponent = K.log(alpha) - .5 * float(self.output_dim) * K.log(2 * np.pi) \
-        - float(self.output_dim + 2) * K.log(K.abs(sigma)) + \
+        - float(self.output_dim + 2) * K.log(K.abs(sigma)) - \
         K.sum((K.expand_dims(y0,2) - mu)**2, axis=1)/(2*(sigma)**2)
 
         log_Z = GaussianMixtureDensityNetwork.log_sum_exp(exponent, axis=1)
@@ -154,7 +154,7 @@ class GaussianMixtureDensityNetwork:
         parameters = K.variable(parameters)
         x = K.variable(y)
         func = lambda i : self.log_Gaussian_likelihood(x[i:i+1,:], parameters)
-        return K.eval(K.map_fn(func, K.arange(0, y.shape[0]),dtype='float32')).reshape((y.shape[0]))
+        return K.eval(K.map_fn(func, K.arange(0, y.shape[0]), dtype='float32')).reshape((y.shape[0]))
 
     def predict(self, X, y0 = None):
         """
