@@ -131,11 +131,11 @@ class GaussianMixtureDensityNetwork:
         adv_error = self.mean_log_Gaussian_likelihood(y_true, adv_output)
         return 0.3 * error + 0.7 * adv_error
     
-    def fit(self, X, y, batch_size=10000, epoch=200, validation_split=0.1):
+    def fit(self, X, y, batch_size=10000, epochs=200, validation_split=0.1, callbacks=None):
         """ Fits model to data
         """
         self.model.fit(X, y, batch_size = batch_size,
-                       nb_epoch = epoch, validation_split = validation_split)
+                       epochs = epochs, validation_split = validation_split, callbacks = callbacks)
         
     def partial_fit(self, X, y):
         """ Fits the model to batches of data
